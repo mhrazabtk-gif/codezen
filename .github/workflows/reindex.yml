@@ -1,4 +1,3 @@
-
 name: Hourly Site Re-indexing
 
 on:
@@ -17,130 +16,53 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
-      # Change this only after checking the project list below.
-      PAGES_PROJECT_NAME: codezen-exs
-
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          package-manager-cache: false
+          node-version: '20'
 
-      - name: Verify Cloudflare Credentials
+      - name: Verify Required Files
         shell: bash
         run: |
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "ERROR: CLOUDFLARE_API_TOKEN secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "ERROR: CLOUDFLARE_ACCOUNT_ID secret is missing."
-            exit 1
-          fi
-
-      - name: List Cloudflare Pages Projects
-        shell: bash
-        run: |
-          echo "Listing Pages projects accessible to these credentials..."
-          npx --yes wrangler@4 pages project list
-
-      - name: Verify Target Project Exists
-        shell: bash
-        run: |
-          npx --yes wrangler@4 pages project list --json > pages-projects.json
-
-          node <<'NODE'
-          const fs = require('fs');
-
-          const file = 'pages-projects.json';
-          const target = process.env.PAGES_PROJECT_NAME;
-          const raw = fs.readFileSync(file, 'utf8');
-
-          let data;
-
-          try {
-            data = JSON.parse(raw);
-          } catch {
-            console.error('Could not parse Cloudflare project list.');
-            console.error(raw);
-            process.exit(1);
-          }
-
-          const projects = Array.isArray(data)
-            ? data
-            : Array.isArray(data.result)
-              ? data.result
-              : Array.isArray(data.projects)
-                ? data.projects
-                : null;
-
-          if (!projects) {
-            console.error('Unexpected project-list format. See output above.');
-            console.error(JSON.stringify(data, null, 2));
-            process.exit(1);
-          }
-
-          const names = projects.map(p => p.name).filter(Boolean);
-
-          console.log('Available Pages projects:');
-          for (const name of names) console.log(`- ${name}`);
-
-          if (!names.includes(target)) {
-            console.error(`ERROR: Project "${target}" was not found.`);
-            console.error('Check CLOUDFLARE_ACCOUNT_ID and API token access.');
-            console.error('If the correct project has another name, update PAGES_PROJECT_NAME.');
-            process.exit(1);
-          }
-
-          console.log(`Verified target project: ${target}`);
-          NODE
-
-      - name: Verify Required Repository Files
-        shell: bash
-        run: |
-          test -s urls.txt || {
+          test -f urls.txt || {
             echo "ERROR: urls.txt is missing."
             exit 1
           }
 
-          test -s _redirects || {
-            echo "ERROR: Original root _redirects file is missing."
+          test -f public/_redirects || {
+            echo "ERROR: public/_redirects is missing."
             exit 1
           }
 
-          test -s 28130b9eccde4611b9fe2363899bec2b.txt || {
+          test -f 16d9ee2660ec4372bdeef3994bb6440d.txt || {
             echo "ERROR: IndexNow key file is missing."
             exit 1
           }
 
-      - name: Generate Sitemap and Prepare Deployment
+      - name: Generate and Validate Sitemap
         run: node build-sitemap.js
 
-      - name: Validate Deployment Files
+      - name: Verify Deployment Files
         shell: bash
         run: |
           test -s public/sitemap.xml
           test -s public/_redirects
-          test -s public/28130b9eccde4611b9fe2363899bec2b.txt
-
-          cmp _redirects public/_redirects
+          test -s public/16d9ee2660ec4372bdeef3994bb6440d.txt
 
           grep -q '<lastmod>' public/sitemap.xml
           grep -q '<changefreq>hourly</changefreq>' public/sitemap.xml
 
-          echo "Sitemap, redirects and key validation passed."
+          echo "All deployment checks passed."
 
       - name: Deploy to Cloudflare Pages
-        run: npx --yes wrangler@4 pages deploy public --project-name="$PAGES_PROJECT_NAME" --commit-dirty=true
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler pages deploy public --project-name=codezen-exs --commit-dirty=true
 
       - name: Run IndexNow Ping
         if: success()
