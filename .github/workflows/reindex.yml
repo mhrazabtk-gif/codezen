@@ -1,20 +1,20 @@
-```yaml
+
 name: Hourly Site Re-indexing
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: codezen-reindex-deploy
+  group: codezen-deployment
   cancel-in-progress: false
 
 jobs:
-  reindex-and-deploy:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     env:
@@ -23,99 +23,66 @@ jobs:
       PAGES_PROJECT_NAME: codezen
 
     steps:
-      - name: Checkout repository
+      - name: Checkout Repository
         uses: actions/checkout@v6
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: "24"
+          node-version: '24'
+          package-manager-cache: false
 
-      - name: Verify required files
+      - name: Verify Required Files
         shell: bash
         run: |
-          set -euo pipefail
+          set -eu
 
-          for file in \
-            urls.txt \
-            _redirects \
-            build-sitemap.js \
-            ping-indexnow.js
-          do
-            if [ ! -f "$file" ]; then
-              echo "::error::Required file is missing: $file"
+          for FILE in urls.txt _redirects build-sitemap.js ping-indexnow.js; do
+            if [ ! -s "$FILE" ]; then
+              echo "ERROR: Required file is missing or empty: $FILE"
               exit 1
             fi
+            echo "OK: $FILE"
           done
 
-          echo "All required files are present."
-
-      - name: List Cloudflare Pages projects
-        continue-on-error: true
-        run: |
-          npx --yes wrangler@4 pages project list
-
-      - name: Generate sitemap and prepare public folder
-        run: |
-          set -euo pipefail
-          node build-sitemap.js
-
-      - name: Validate generated files
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          test -s public/sitemap.xml
-          test -f public/_redirects
-
-          if ! grep -q '<lastmod>' public/sitemap.xml; then
-            echo "::error::Sitemap is missing lastmod."
-            exit 1
-          fi
-
-          if ! grep -q '<changefreq>hourly</changefreq>' public/sitemap.xml; then
-            echo "::error::Sitemap is missing hourly changefreq."
-            exit 1
-          fi
-
-          if ! cmp -s _redirects public/_redirects; then
-            echo "::error::Root _redirects and public/_redirects do not match."
-            exit 1
-          fi
-
-          if [ ! -f public/28130b9eccde4611b9fe2363899bec2b.txt ]; then
-            echo "::error::IndexNow key file is missing from public."
-            exit 1
-          fi
-
-          echo "Sitemap, redirects, and IndexNow key file validated."
-          echo "Generated sitemap details:"
-          grep -o '<loc>[^<]*</loc>' public/sitemap.xml | head -n 5
-
-      - name: Verify Cloudflare credentials
-        shell: bash
-        run: |
-          set -euo pipefail
-
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "::error::CLOUDFLARE_API_TOKEN GitHub secret is missing."
+            echo "ERROR: CLOUDFLARE_API_TOKEN secret is missing."
             exit 1
           fi
 
           if [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "::error::CLOUDFLARE_ACCOUNT_ID GitHub secret is missing."
+            echo "ERROR: CLOUDFLARE_ACCOUNT_ID secret is missing."
             exit 1
           fi
 
-          echo "Cloudflare secrets are configured."
+      - name: Generate Sitemap and Prepare Deployment
+        run: node build-sitemap.js
+
+      - name: Validate Deployment Files
+        shell: bash
+        run: |
+          set -eu
+
+          test -s public/sitemap.xml
+          test -s public/_redirects
+          test -s public/28130b9eccde4611b9fe2363899bec2b.txt
+
+          cmp _redirects public/_redirects
+
+          grep -q '<lastmod>' public/sitemap.xml
+          grep -q '<changefreq>hourly</changefreq>' public/sitemap.xml
+
+          echo "Sitemap, redirects and IndexNow file validated."
+
+      - name: List Cloudflare Pages Projects
+        run: npx --yes wrangler@4 pages project list
 
       - name: Deploy to Cloudflare Pages
-        run: |
-          npx --yes wrangler@4 pages deploy public \
-            --project-name="$PAGES_PROJECT_NAME" \
-            --commit-dirty=true
+        run: >
+          npx --yes wrangler@4 pages deploy public
+          --project-name="$PAGES_PROJECT_NAME"
+          --commit-dirty=true
 
-      - name: Submit URLs to IndexNow
-        run: |
-          node ping-indexnow.js
-```
+      - name: Run IndexNow Ping
+        if: success()
+        run: node ping-indexnow.js
