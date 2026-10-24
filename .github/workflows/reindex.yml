@@ -35,43 +35,15 @@ jobs:
       - name: Verify Required Files
         shell: bash
         run: |
-          echo "Current directory:"
-          pwd
+          set -eu
 
-          echo ""
-          echo "Checked-out commit:"
-          git log -1 --oneline
-
-          echo ""
-          echo "Repository root files:"
-          ls -la
-
-          echo ""
-          echo "Checking required files..."
-
-          FAILED=0
-
-          for FILE in \
-            "urls.txt" \
-            "_redirects" \
-            "28130b9eccde4611b9fe2363899bec2b.txt" \
-            "build-sitemap.js" \
-            "ping-indexnow.js"
-          do
-            if [ -s "$FILE" ]; then
-              echo "OK: $FILE"
-            else
-              echo "MISSING OR EMPTY: $FILE"
-              FAILED=1
+          for FILE in urls.txt _redirects build-sitemap.js ping-indexnow.js; do
+            if [ ! -s "$FILE" ]; then
+              echo "ERROR: Required file is missing or empty: $FILE"
+              exit 1
             fi
+            echo "OK: $FILE"
           done
-
-          if [ "$FAILED" -ne 0 ]; then
-            echo ""
-            echo "ERROR: One or more required root files are missing or empty."
-            echo "Check the file names, paths, and checked-out commit above."
-            exit 1
-          fi
 
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
             echo "ERROR: CLOUDFLARE_API_TOKEN secret is missing."
@@ -83,9 +55,6 @@ jobs:
             exit 1
           fi
 
-          echo ""
-          echo "Required files and credentials are present."
-
       - name: Generate Sitemap and Prepare Deployment
         run: node build-sitemap.js
 
@@ -94,24 +63,16 @@ jobs:
         run: |
           set -eu
 
-          for FILE in \
-            "public/sitemap.xml" \
-            "public/_redirects" \
-            "public/28130b9eccde4611b9fe2363899bec2b.txt"
-          do
-            if [ ! -s "$FILE" ]; then
-              echo "ERROR: Deployment file missing or empty: $FILE"
-              exit 1
-            fi
-            echo "OK: $FILE"
-          done
+          test -s public/sitemap.xml
+          test -s public/_redirects
+          test -s public/28130b9eccde4611b9fe2363899bec2b.txt
 
           cmp _redirects public/_redirects
 
           grep -q '<lastmod>' public/sitemap.xml
           grep -q '<changefreq>hourly</changefreq>' public/sitemap.xml
 
-          echo "Sitemap and redirect validation passed."
+          echo "Sitemap, redirects and IndexNow file validated."
 
       - name: List Cloudflare Pages Projects
         run: npx --yes wrangler@4 pages project list
