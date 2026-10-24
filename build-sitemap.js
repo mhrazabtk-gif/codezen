@@ -8,10 +8,14 @@ const KEY = '28130b9eccde4611b9fe2363899bec2b';
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const URLS_FILE = path.join(ROOT, 'urls.txt');
+
+// Original files in the repository root
 const ROOT_REDIRECTS = path.join(ROOT, '_redirects');
+const ROOT_KEY_FILE = path.join(ROOT, `${KEY}.txt`);
+
+// Files that Cloudflare Pages will deploy
 const PUBLIC_REDIRECTS = path.join(PUBLIC_DIR, '_redirects');
-const ROOT_KEY = path.join(ROOT, `${KEY}.txt`);
-const PUBLIC_KEY = path.join(PUBLIC_DIR, `${KEY}.txt`);
+const PUBLIC_KEY_FILE = path.join(PUBLIC_DIR, `${KEY}.txt`);
 const SITEMAP_FILE = path.join(PUBLIC_DIR, 'sitemap.xml');
 
 if (!fs.existsSync(URLS_FILE)) {
@@ -19,35 +23,38 @@ if (!fs.existsSync(URLS_FILE)) {
 }
 
 if (!fs.existsSync(ROOT_REDIRECTS)) {
-  throw new Error('Root _redirects is missing. Deployment stopped.');
+  throw new Error('Original root _redirects file is missing. Deployment stopped.');
 }
 
-if (!fs.existsSync(ROOT_KEY)) {
-  throw new Error('Existing IndexNow key file is missing.');
+if (!fs.existsSync(ROOT_KEY_FILE)) {
+  throw new Error('Original IndexNow key file is missing. Deployment stopped.');
 }
 
-if (fs.readFileSync(ROOT_KEY, 'utf8').trim() !== KEY) {
-  throw new Error('IndexNow key does not match the existing key file.');
+const keyContents = fs.readFileSync(ROOT_KEY_FILE, 'utf8').trim();
+
+if (keyContents !== KEY) {
+  throw new Error('IndexNow key file content does not match the configured key.');
 }
 
-const redirectContent = fs.readFileSync(ROOT_REDIRECTS, 'utf8');
+// Read and preserve the original redirect rules.
+const redirectContents = fs.readFileSync(ROOT_REDIRECTS, 'utf8');
 
-const redirectRules = redirectContent
+const redirectRules = redirectContents
   .split(/\r?\n/)
   .filter(line => line.trim() && !line.trim().startsWith('#'));
 
 if (redirectRules.length > 2000) {
-  throw new Error(`Redirect limit check failed: ${redirectRules.length} rules.`);
+  throw new Error(`Redirect limit check failed: ${redirectRules.length} rules found.`);
 }
 
-const rawUrls = fs.readFileSync(URLS_FILE, 'utf8')
+const inputUrls = fs.readFileSync(URLS_FILE, 'utf8')
   .split(/\r?\n/)
   .map(line => line.trim())
   .filter(Boolean);
 
 const urls = new Set();
 
-for (const value of rawUrls) {
+for (const value of inputUrls) {
   let url;
 
   try {
@@ -65,8 +72,10 @@ for (const value of rawUrls) {
     throw new Error(`Unexpected URL in urls.txt: ${value}`);
   }
 
-  // Standardize URLs to HTTPS and remove duplicate path slashes.
+  // Standardize sitemap URLs to HTTPS.
   url.protocol = 'https:';
+
+  // Remove duplicate slashes from the pathname.
   url.pathname = '/' + url.pathname.split('/').filter(Boolean).join('/');
 
   urls.add(url.href);
@@ -76,6 +85,14 @@ if (urls.size === 0) {
   throw new Error('No valid URLs found. Deployment stopped.');
 }
 
+fs.mkdirSync(PUBLIC_DIR, { recursive: true });
+
+// Copy original files into the actual deployment directory.
+fs.copyFileSync(ROOT_REDIRECTS, PUBLIC_REDIRECTS);
+fs.copyFileSync(ROOT_KEY_FILE, PUBLIC_KEY_FILE);
+
+const lastmod = new Date().toISOString();
+
 function escapeXml(value) {
   return value
     .replace(/&/g, '&amp;')
@@ -84,8 +101,6 @@ function escapeXml(value) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
 }
-
-const lastmod = new Date().toISOString();
 
 let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
 xml += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n';
@@ -100,35 +115,30 @@ for (const url of urls) {
 
 xml += '</urlset>\n';
 
-fs.mkdirSync(PUBLIC_DIR, { recursive: true });
-
-// Preserve the original redirect rules exactly.
-fs.copyFileSync(ROOT_REDIRECTS, PUBLIC_REDIRECTS);
-
-// Copy the existing, verified IndexNow key into the deployment folder.
-fs.copyFileSync(ROOT_KEY, PUBLIC_KEY);
-
-// Generate only the sitemap; do not overwrite other public assets.
 fs.writeFileSync(SITEMAP_FILE, xml, 'utf8');
 
-// Validate the final deployment files.
-if (fs.readFileSync(PUBLIC_REDIRECTS, 'utf8') !== redirectContent) {
-  throw new Error('Redirect file verification failed.');
-}
-
-if (fs.readFileSync(PUBLIC_KEY, 'utf8').trim() !== KEY) {
-  throw new Error('Public IndexNow key verification failed.');
+// Final deployment checks.
+if (!fs.existsSync(PUBLIC_REDIRECTS)) {
+  throw new Error('public/_redirects is missing. Deployment stopped.');
 }
 
 if (
-  !xml.includes('<lastmod>') ||
-  !xml.includes('<changefreq>hourly</changefreq>')
+  fs.readFileSync(PUBLIC_REDIRECTS, 'utf8') !== redirectContents
 ) {
-  throw new Error('Required sitemap tags are missing.');
+  throw new Error('Redirect file differs from the original. Deployment stopped.');
 }
 
-console.log(`Sitemap generated with ${urls.size} URLs.`);
+if (fs.readFileSync(PUBLIC_KEY_FILE, 'utf8').trim() !== KEY) {
+  throw new Error('Deployed IndexNow key file validation failed.');
+}
+
+if (!fs.existsSync(SITEMAP_FILE)) {
+  throw new Error('Sitemap was not generated.');
+}
+
+console.log(`Sitemap URLs: ${urls.size}`);
 console.log(`lastmod: ${lastmod}`);
 console.log('changefreq: hourly');
-console.log(`Redirect rules preserved: ${redirectRules.length}`);
-console.log('All validation checks passed.');
+console.log(`Redirect rules copied and verified: ${redirectRules.length}`);
+console.log('IndexNow key copied and verified.');
+console.log('All build checks passed.');
