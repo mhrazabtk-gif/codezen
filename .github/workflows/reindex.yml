@@ -1,3 +1,4 @@
+
 name: Hourly Site Re-indexing
 
 on:
@@ -5,9 +6,17 @@ on:
     - cron: '0 * * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: codezen-exs-deployment
+  cancel-in-progress: false
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -17,14 +26,47 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Run Sitemap Builder
+      - name: Verify Source Files
+        shell: bash
+        run: |
+          test -s urls.txt || {
+            echo "ERROR: urls.txt is missing or empty."
+            exit 1
+          }
+
+          test -s _redirects || {
+            echo "ERROR: Root _redirects is missing."
+            exit 1
+          }
+
+          test -s 28130b9eccde4611b9fe2363899bec2b.txt || {
+            echo "ERROR: IndexNow key file is missing."
+            exit 1
+          }
+
+      - name: Generate Sitemap and Prepare Deployment
         run: node build-sitemap.js
 
-      - name: Run IndexNow Ping
-        run: node ping-indexnow.js
+      - name: Validate Deployment Files
+        shell: bash
+        run: |
+          test -s public/sitemap.xml
+          test -s public/_redirects
+          test -s public/28130b9eccde4611b9fe2363899bec2b.txt
+
+          cmp _redirects public/_redirects
+
+          grep -q '<lastmod>' public/sitemap.xml
+          grep -q '<changefreq>hourly</changefreq>' public/sitemap.xml
+
+          echo "Deployment validation passed."
 
       - name: Deploy to Cloudflare Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler pages deploy public --project-name=codezen-exs --commit-dirty=true
+
+      - name: Run IndexNow Ping
+        if: success()
+        run: node ping-indexnow.js
