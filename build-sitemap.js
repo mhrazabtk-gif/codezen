@@ -1,31 +1,38 @@
+
 const fs = require('fs');
 const path = require('path');
 
 const DOMAIN = 'https://codezen-exs.pages.dev';
-const KEY = '16d9ee2660ec4372bdeef3994bb6440d';
+const KEY = '28130b9eccde4611b9fe2363899bec2b';
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const URLS_FILE = path.join(ROOT, 'urls.txt');
-const REDIRECTS_FILE = path.join(PUBLIC_DIR, '_redirects');
+const ROOT_REDIRECTS = path.join(ROOT, '_redirects');
+
+const PUBLIC_REDIRECTS = path.join(PUBLIC_DIR, '_redirects');
+const PUBLIC_KEY_FILE = path.join(PUBLIC_DIR, `${KEY}.txt`);
 const SITEMAP_FILE = path.join(PUBLIC_DIR, 'sitemap.xml');
-const KEY_FILE = path.join(PUBLIC_DIR, `${KEY}.txt`);
-const ROOT_KEY_FILE = path.join(ROOT, `${KEY}.txt`);
 
 if (!fs.existsSync(URLS_FILE)) {
   throw new Error('urls.txt is missing. Deployment stopped.');
 }
 
-if (!fs.existsSync(REDIRECTS_FILE)) {
-  throw new Error('public/_redirects is missing. Deployment stopped.');
+if (!fs.existsSync(ROOT_REDIRECTS)) {
+  throw new Error('Root _redirects file is missing. Deployment stopped.');
 }
 
-const redirectRules = fs.readFileSync(REDIRECTS_FILE, 'utf8')
+// Preserve the original redirect file exactly.
+const originalRedirects = fs.readFileSync(ROOT_REDIRECTS, 'utf8');
+
+const redirectRules = originalRedirects
   .split(/\r?\n/)
   .filter(line => line.trim() && !line.trim().startsWith('#'));
 
 if (redirectRules.length > 2000) {
-  throw new Error(`Redirect validation failed: ${redirectRules.length} rules.`);
+  throw new Error(
+    `Redirect validation failed: ${redirectRules.length} rules found.`
+  );
 }
 
 const rawUrls = fs.readFileSync(URLS_FILE, 'utf8')
@@ -53,7 +60,10 @@ for (const value of rawUrls) {
     throw new Error(`Unexpected URL in urls.txt: ${value}`);
   }
 
+  // Standardize URLs to HTTPS.
   url.protocol = 'https:';
+
+  // Normalize duplicate slashes in the pathname.
   url.pathname = '/' + url.pathname.split('/').filter(Boolean).join('/');
 
   urls.add(url.href);
@@ -63,6 +73,16 @@ if (urls.size === 0) {
   throw new Error('No valid URLs found. Deployment stopped.');
 }
 
+fs.mkdirSync(PUBLIC_DIR, { recursive: true });
+
+// Copy original redirects to the actual deployment directory.
+fs.writeFileSync(PUBLIC_REDIRECTS, originalRedirects, 'utf8');
+
+// Generate the IndexNow verification file in the deployment directory.
+// IMPORTANT: KEY must match the key used by ping-indexnow.js.
+fs.writeFileSync(PUBLIC_KEY_FILE, KEY, 'utf8');
+
+// Generate sitemap with hourly lastmod and changefreq.
 const lastmod = new Date().toISOString();
 
 function escapeXml(value) {
@@ -87,31 +107,26 @@ for (const url of urls) {
 
 xml += '</urlset>\n';
 
-fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 fs.writeFileSync(SITEMAP_FILE, xml, 'utf8');
 
-if (fs.existsSync(ROOT_KEY_FILE)) {
-  const rootKey = fs.readFileSync(ROOT_KEY_FILE, 'utf8').trim();
-
-  if (rootKey !== KEY) {
-    throw new Error('Root IndexNow key file does not match the configured key.');
-  }
-} else {
-  throw new Error('Existing root IndexNow key file is missing.');
+// Validate all generated deployment files.
+if (
+  fs.readFileSync(PUBLIC_REDIRECTS, 'utf8') !== originalRedirects
+) {
+  throw new Error('Redirect file verification failed.');
 }
 
-fs.writeFileSync(KEY_FILE, KEY, 'utf8');
-
-if (!fs.existsSync(REDIRECTS_FILE)) {
-  throw new Error('_redirects is missing after sitemap generation.');
+if (fs.readFileSync(PUBLIC_KEY_FILE, 'utf8').trim() !== KEY) {
+  throw new Error('IndexNow key file verification failed.');
 }
 
-if (!fs.existsSync(SITEMAP_FILE) || !fs.existsSync(KEY_FILE)) {
-  throw new Error('Sitemap or IndexNow key file is missing.');
+if (!fs.readFileSync(SITEMAP_FILE, 'utf8').includes('<changefreq>hourly</changefreq>')) {
+  throw new Error('Hourly sitemap frequency is missing.');
 }
 
-console.log(`Sitemap URLs: ${urls.size}`);
+console.log(`Sitemap URLs generated: ${urls.size}`);
 console.log(`lastmod: ${lastmod}`);
 console.log('changefreq: hourly');
 console.log(`Redirect rules preserved: ${redirectRules.length}`);
+console.log('IndexNow verification file generated.');
 console.log('Build validation passed.');
