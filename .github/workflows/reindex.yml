@@ -26,16 +26,16 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Verify Source Files
+      - name: Verify Original Files
         shell: bash
         run: |
           test -s urls.txt || {
-            echo "ERROR: urls.txt is missing or empty."
+            echo "ERROR: urls.txt is missing."
             exit 1
           }
 
           test -s _redirects || {
-            echo "ERROR: Root _redirects is missing."
+            echo "ERROR: Original root _redirects file is missing."
             exit 1
           }
 
