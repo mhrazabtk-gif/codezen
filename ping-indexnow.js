@@ -2,9 +2,9 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 
-const HOST = 'codezen-exs.pages.dev';
+const HOST = 'codezen-exs.pageaura.xyz';
 const KEY = '28130b9eccde4611b9fe2363899bec2b'; // Replace with your IndexNow key string
-const KEY_LOCATION = `https://codezen-exs.pages.dev/28130b9eccde4611b9fe2363899bec2b.txt`;
+const KEY_LOCATION = `https://codezen-exs.pageaura.xyz/28130b9eccde4611b9fe2363899bec2b.txt`;
 
 const urlsFile = path.join(__dirname, 'urls.txt');
 let urlList = [];
