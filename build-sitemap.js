@@ -52,7 +52,7 @@ for (const value of rawUrls) {
   }
 
   if (
-    url.hostname.toLowerCase() !== 'codezen-exs.pages.dev' ||
+    url.hostname.toLowerCase() !== 'codezen-exs.pageaura.xyz' ||
     !['http:', 'https:'].includes(url.protocol) ||
     url.username ||
     url.password
