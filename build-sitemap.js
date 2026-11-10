@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const DOMAIN = 'https://codezen-exs.pages.dev';
+const DOMAIN = 'https://codezen-exs.pageaura.xyz';
 const KEY = '28130b9eccde4611b9fe2363899bec2b';
 
 const ROOT = __dirname;
